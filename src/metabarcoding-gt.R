@@ -136,6 +136,16 @@ save_quality_plot <- function(plot_data, file_path, width=10, height=8) {
 # Extract sample names
 get.sample.name <- function(fname) strsplit(basename(fname), "_")[[1]][4]
 
+get.sample.name.16s <- function(fname) {
+  # Extract the base filename
+  base <- basename(fname)
+  # Extract the part that looks like "Adapter3820-I4"
+  adapter_part <- strsplit(base, "_")[[1]][3]
+  # Extract "I4" from "Adapter3820-I4"
+  strsplit(adapter_part, "-")[[1]][2]
+}
+
+
 # Function to get the number of reads at each step
 getN <- function(x) sum(getUniques(x))
 

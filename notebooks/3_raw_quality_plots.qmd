@@ -18,7 +18,10 @@ fnFs.cut <- readRDS(file.path(LOCUS_DIR, "R_objects", "02_fnFs.cut.rds"))
 fnRs.cut <- readRDS(file.path(LOCUS_DIR, "R_objects", "02_fnRs.cut.rds"))
 
 # extract sample names and write to R object
-sample.names <- unname(sapply(fnFs.cut, get.sample.name))
+sample.names <- unname(sapply(
+  fnFs.cut,
+  if (LOCUS == "16s") get.sample.name.16s else get.sample.name
+))
 
 saveRDS(sample.names, file = file.path(LOCUS_DIR, 
                                        "R_objects", 

@@ -37,8 +37,11 @@ colnames(track) <- c(
   "merged",
   "nochim")
 
-# get sample names
-sample.names <- unname(sapply(filtFs, get.sample.name))
+# extract sample names 
+sample.names <- unname(sapply(
+  fnFs.cut,
+  if (LOCUS == "16s") get.sample.name.16s else get.sample.name
+))
 rownames(track) <- sample.names
 
 write.table(track, file = file.path(LOCUS_DIR, 

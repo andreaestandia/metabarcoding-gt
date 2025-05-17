@@ -14,10 +14,15 @@ install_required_packages()
 ```
 
 ```{r}
-trimlength1 <- 120  # Forward still looks fine at 250
-trimlength2 <- 100  # Reverse read quality drops fast, try 140 or even 120
+if (LOCUS == "16s") {
+  trimlength1 <- 125
+  trimlength2 <- 125
+} else {
+  trimlength1 <- 120
+  trimlength2 <- 100
+}
 maxEE_read1 <- 2
-maxEE_read2 <- 2    # Loosen expected error threshold for reverse reads
+maxEE_read2 <- 2  
 truncQ <- 2
 minlength <- 50
 subset <- FALSE
