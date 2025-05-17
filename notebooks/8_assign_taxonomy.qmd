@@ -1,0 +1,168 @@
+---
+  title: "Step 8: Assign taxonomy"
+author: "Andrea Estandia"
+date: "`r Sys.Date()`"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source(here::here("src", "metabarcoding-gt.R"))
+install_required_packages()
+```
+
+```{r}
+# Read BLAST output
+blast <- read.table(file.path(LOCUS_DIR, "outputs",
+                              "blast",
+                              "blast_results_A10_ASVs.tab"), header = FALSE)
+# Define input and output directories
+blast_dir <- file.path(LOCUS_DIR, "outputs",
+                              "blast")
+
+output_dir <- file.path(LOCUS_DIR, "plots")
+
+# Ensure output directory exists
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+
+# Custom color palette
+organic_colorful_palette <- c(
+  "#D9BF77", "#E07A5F", "#3D5A80", "#81B29A", "#F2CC8F",
+  "#5F4B32", "#ADC178", "#D6A77A", "#6B9080", "#A3C4BC"
+)
+
+# Function to extract genus/species from accession
+get_genus_species <- function(acc) {
+  tryCatch({
+    summary <- entrez_summary(db = "nuccore", id = acc)
+    title <- summary$title
+    species <- str_extract(title, "^[A-Z][a-z]+\\s[a-z]+")
+    genus <- word(species, 1)
+    return(c(species = species, genus = genus))
+  }, error = function(e) {
+    return(c(species = NA, genus = NA))
+  })
+}
+
+# List all .tab files with full path
+tab_files <- list.files(blast_dir, pattern = "blast_results_.*\\.tab$", full.names = TRUE)
+
+# Loop over files
+for (file in tab_files) {
+  cat("Processing", file, "...\n")
+  
+  blast <- read.table(file, header = FALSE)
+  blast <- blast %>%
+    mutate(accession = str_extract(V2, "(?<=\\|)[A-Z]{1,2}_?\\d+\\.\\d+"))
+  
+  unique_accessions <- unique(blast$accession)
+  tax_info <- t(sapply(unique_accessions, get_genus_species))
+  tax_df <- data.frame(accession = unique_accessions, tax_info, row.names = NULL)
+  
+  blast_tax <- left_join(blast, tax_df, by = "accession") %>% as.data.frame()
+  
+  # Genus plot
+  genus_counts <- blast_tax %>%
+    group_by(genus) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n)) %>%
+    filter(!is.na(genus))
+  
+  genus_plot <- ggplot(genus_counts, aes(area = n, fill = genus, label = genus)) +
+    geom_treemap() +
+    geom_treemap_text(colour = "white", place = "center", grow = TRUE, reflow = TRUE) +
+    labs(title = paste("Genus -", basename(file))) +
+    scale_fill_manual(values = colorRampPalette(organic_colorful_palette)(nrow(genus_counts))) +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  # Species plot
+  species_counts <- blast_tax %>%
+    group_by(species) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n)) %>%
+    filter(!is.na(species))
+  
+  species_plot <- ggplot(species_counts, aes(area = n, fill = species, label = species)) +
+    geom_treemap() +
+    geom_treemap_text(colour = "white", place = "center", grow = TRUE, reflow = TRUE) +
+    labs(title = paste("Species -", basename(file))) +
+    scale_fill_manual(values = colorRampPalette(organic_colorful_palette)(nrow(species_counts))) +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  # Combine and save
+  final_plot <- genus_plot / species_plot
+  out_file <- file.path(output_dir, paste0("plot_", tools::file_path_sans_ext(basename(file)), ".pdf"))
+  ggsave(out_file, plot = final_plot, width = 12, height = 10)
+}
+
+############
+
+# --- Directory containing BLAST files ---
+blast_dir <- "/home/estandia/"
+blast_files <- list.files(blast_dir, pattern = "blast_results_.*\\.tab$", full.names = TRUE)
+
+# --- Read and combine all BLAST files ---
+blast_data <- map_dfr(blast_files, read_blast_file)
+
+# --- Get unique accessions and look up species names ---
+unique_accessions <- unique(blast_data$accession)
+tax_info <- t(sapply(unique_accessions, get_genus_species))
+tax_df <- data.frame(accession = unique_accessions, tax_info, row.names = NULL)
+
+# --- Merge taxonomic info with BLAST data ---
+blast_data <- left_join(blast_data, tax_df, by = "accession")
+
+# --- Build presence/absence matrix ---
+presence_data <- blast_data %>%
+  filter(!is.na(genus)) %>%
+  distinct(sample, genus) %>%
+  mutate(present = 1)
+
+matrix_data <- presence_data %>%
+  pivot_wider(names_from = genus, values_from = present, values_fill = 0)
+
+# --- Convert to long format for plotting ---
+long_matrix <- matrix_data %>%
+  pivot_longer(-sample, names_to = "genus", values_to = "present")
+
+# --- Plot ---
+ggplot(long_matrix, aes(x = genus, y = sample, fill = factor(present))) +
+  geom_tile(color = "white") +
+  scale_fill_manual(values = c("0" = "white", "1" = "#A3C4BC"), name = "Presence") +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  labs(x = "", y = "", title = "Species Presence/Absence matrix")
+
+# --- Calculate total presence per genus ---
+genus_order <- matrix_data %>%
+  select(-sample) %>%
+  summarise(across(everything(), sum)) %>%
+  pivot_longer(everything(), names_to = "genus", values_to = "total_presence") %>%
+  arrange(desc(total_presence)) %>%
+  pull(genus)
+
+# --- Convert to long format with genus as ordered factor ---
+long_matrix <- matrix_data %>%
+  pivot_longer(-sample, names_to = "genus", values_to = "present") %>%
+  mutate(genus = factor(genus, levels = genus_order))
+
+# --- Plot ---
+ggplot(long_matrix, aes(x = genus, y = sample, fill = factor(present))) +
+  geom_tile(color = "white") +
+  scale_fill_manual(values = c("0" = "white", "1" = "#A3C4BC"), name = "Presence") +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  labs(x = "", y = "", title = "Genus Presence/Absence Matrix")
+```

@@ -1,0 +1,288 @@
+---
+  title: "Step 5: Trim and filter"
+author: "Andrea Estandia"
+date: "`r Sys.Date()`"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source(here::here("src", "metabarcoding-gt.R"))
+install_required_packages()
+```
+
+```{r}
+# --- Define input directory ---
+blast_dir <- file.path(LOCUS_DIR, "outputs", "blast")
+blast_files <- list.files(blast_dir, pattern = "blast_results_.*\\.tab$", full.names = TRUE)
+
+# --- Function to extract genus and species from accession ---
+get_genus_species <- function(acc) {
+  tryCatch({
+    summary <- entrez_summary(db = "nuccore", id = acc)
+    title <- summary$title
+    species <- str_extract(title, "^[A-Z][a-z]+\\s[a-z]+")
+    genus <- word(species, 1)
+    return(c(species = species, genus = genus))
+  }, error = function(e) {
+    return(c(species = NA, genus = NA))
+  })
+}
+
+# --- Process all files and combine into a single dataframe ---
+taxonomy_df <- map_dfr(blast_files, function(file) {
+  # Extract sample code from filename (e.g., A01 from "blast_results_A01_ASVs.tab")
+  code <- str_extract(basename(file), "(?<=blast_results_)[A-Za-z0-9]+")
+  
+  # Read BLAST results
+  blast <- read.table(file, header = FALSE)
+  blast <- blast %>%
+    mutate(accession = str_extract(V2, "(?<=\\|)[A-Z]{1,2}_?\\d+\\.\\d+"))
+  
+  # Get taxonomy info for each unique accession
+  unique_accessions <- unique(blast$accession)
+  tax_info <- t(sapply(unique_accessions, get_genus_species))
+  tax_df <- data.frame(accession = unique_accessions, tax_info, row.names = NULL)
+  
+  # Merge and return with sample code
+  blast_tax <- left_join(blast, tax_df, by = "accession") %>%
+    filter(!is.na(genus)) %>%
+    select(genus, species, accession) %>%
+    mutate(code = code)
+  
+  return(blast_tax)
+})
+```
+
+```{r}
+metadata <- read.csv(file.path(DATA_DIR, "metabarcoding_metadata.csv")) %>% 
+  mutate(code = sub("^([A-I])0", "\\1", code))
+
+final_file <- 
+  taxonomy_df %>% 
+  left_join(metadata) %>% 
+  filter(sample_name!="NA") %>% 
+  mutate(sample_name = if_else(day %in% c(5, 10),
+                               paste(nestbox, sample_name, sep = "_"),
+                               sample_name)) %>% 
+  distinct(sample_name, species, .keep_all = TRUE)
+
+write.csv(final_file, 
+          file.path(LOCUS_DIR, "outputs", "COI_species.csv"), 
+          row.names = F)
+
+```
+
+Retrieve nestbox info and date info
+```{r}
+faecal_samples <- 
+  read.csv(file.path(DATA_DIR, 
+                     "faecal_samples.csv"),
+                      header=T) %>% 
+  mutate(
+    sample_name = case_when(
+      is.na(bto_ring) ~ paste0(nb, "_n", ind),
+      TRUE ~ bto_ring
+    )
+  ) %>% select(sample_name, date)
+
+nb <- read.csv(file.path(DATA_DIR, "nb_info.csv"), header=T) %>% 
+  rename(nestbox=nb)
+```
+
+
+```{r}
+richness <- 
+  final_file %>% 
+  left_join(nb, by="nestbox") %>% 
+  left_join(faecal_samples, by="sample_name") %>%
+  group_by(date, sample_name, nestbox, day, x, y, edge_EDI, altitude_m, 
+           aspect,
+           habitat) %>%
+  summarise(richness = n_distinct(species))
+
+richness$nestbox <- as.factor(richness$nestbox)
+richness$sample_name <- as.factor(richness$sample_name)
+richness$day <- as.factor(richness$day)
+
+richness %>%
+  ggplot(aes(x = as.factor(day), y = richness)) +
+  geom_dots(
+    aes(y = richness),
+    side = "top",     # dots on top of axis
+    dotsize = 1,      # size of the dots
+    binwidth = 1,     # bin width to prevent overlap
+    color = "darkgrey",
+    fill = "darkgrey",
+    alpha = 0.8
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 18,
+    size = 2.5,
+    color = "black"
+  ) +
+  stat_summary(
+    fun.data = mean_cl_normal,  # Or use mean_se if preferred
+    geom = "errorbar",
+    width = 0.2,
+    color = "black"
+  ) +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  labs(x = "\nDay", y = "Richness\n")
+
+# Find nestboxes that have all three days represented
+complete_nestboxes <- richness %>%
+  group_by(nestbox) %>%
+  summarize(days_present = list(unique(day))) %>%
+  filter(sapply(days_present, function(x) all(c(5, 10, 15) %in% x))) %>%
+  pull(nestbox)
+
+# Filter richness to include only those nestboxes
+richness_filtered <- richness %>%
+  filter(nestbox %in% complete_nestboxes)
+
+# Then plot as you did, but with filtered data:
+richness_filtered %>%
+  ggplot(aes(x = as.factor(day), y = richness)) +
+  geom_dots(
+    side = "top",     # dots on top of axis
+    dotsize = 1,      # size of the dots
+    binwidth = 1,     # bin width to prevent overlap
+    color = "darkgrey",
+    fill = "darkgrey",
+    alpha = 0.8
+  ) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 18,
+    size = 2.5,
+    color = "black"
+  ) +
+  stat_summary(
+    fun.data = mean_cl_normal,  # mean and confidence interval
+    geom = "errorbar",
+    width = 0.2,
+    color = "black"
+  ) +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  labs(x = "\nDay", y = "Richness\n")
+
+# Filter data for complete nestboxes
+richness_filtered <- richness %>%
+  filter(nestbox %in% complete_nestboxes)
+
+# Fit linear mixed model
+model <- lmer(richness ~ factor(day) + (1 | nestbox/sample_name), data = richness_filtered)
+
+# Summary with p-values
+summary(model)
+```
+
+```{r}
+
+richness %>%
+  filter(day == 15) %>%
+  ggplot(aes(x = x, y = y, color = richness)) +
+  geom_point(size = 3) +
+  scale_color_viridis(option = "magma") +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    panel.background = element_rect(fill = "gray30", color = NA),
+    plot.background = element_rect(fill = "gray30", color = NA),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 8, color = "white"),
+    axis.text.y = element_text(size = 8, color = "white"),
+    axis.title = element_text(color = "white"),
+    legend.position = "right",
+    legend.text = element_text(color = "white"),
+    legend.title = element_text(color = "white")
+  ) +
+  labs(x = "\nEasting", y = "Northing\n", color = "Richness")
+
+richness %>%
+  ggplot(aes(x = richness, y = habitat)) +
+  geom_point(size = 3) +
+  scale_color_viridis(option = "magma") +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    axis.title = element_text(),
+    legend.position = "right",
+    legend.text = element_text(),
+    legend.title = element_text()
+  ) +
+  geom_smooth()+
+  labs(x = "\nRichness", y = "Edge\n", color = "Richness")
+
+# If not Date, convert it:
+richness$date <- as.Date(richness$date)
+
+# Now compute days since start
+richness$days_since_start <- as.numeric(richness$date - min(richness$date, na.rm = TRUE))
+
+# Check result
+head(richness[, c("date", "days_since_start")])
+
+model_quant <- lmer(richness ~ day + days_since_start + (1 | nestbox/sample_name), data = richness)
+summary(model_quant)
+
+# Compare to model without days_since_start:
+model_null <- lmer(richness ~ day + (1 | nestbox/sample_name), data = richness)
+anova(model_null, model_quant)
+
+
+
+```
+
+```{r}
+library(gganimate)
+
+# Filter only days 5, 10, 15
+plot_data <- richness %>%
+  filter(day %in% c(5, 10, 15))
+
+# Create the plot with animation frame by 'day'
+p <- ggplot(plot_data, aes(x = x, y = y, color = richness)) +
+  geom_point(size = 3) +
+  scale_color_viridis(option = "magma") +
+  theme_minimal(base_family = "roboto") +
+  theme(
+    panel.background = element_rect(fill = "black", color = NA),
+    plot.background = element_rect(fill = "black", color = NA),
+    panel.grid = element_line(color = "gray30"),
+    axis.text.x = element_text(size = 8, color = "white"),
+    axis.text.y = element_text(size = 8, color = "white"),
+    axis.title = element_text(color = "white"),
+    legend.position = "right",
+    legend.background = element_rect(fill = "black"),
+    legend.text = element_text(color = "white"),
+    legend.title = element_text(color = "white")
+  ) +
+  labs(x = "\nEasting", y = "Northing\n", color = "Richness") +
+  # Animate by day
+  transition_states(day, state_length = 2, wrap = FALSE) +
+  ease_aes('cubic-in-out') +
+  ggtitle('Day: {closest_state}')
+
+# Render and save gif (change filename and duration as you want)
+animate(p, nframes = 60, fps = 10, width = 600, height = 400, renderer = gifski_renderer("richness_days.gif"))
+
+```
+

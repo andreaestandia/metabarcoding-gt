@@ -1,0 +1,49 @@
+---
+  title: "Step 5: Trim and filter"
+author: "Andrea Estandia"
+date: "`r Sys.Date()`"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source(here::here("src", "metabarcoding-gt.R"))
+install_required_packages()
+```
+
+```{r}
+## read in the lists of filtered reads
+filtFs <- readRDS(file.path(LOCUS_DIR, "R_objects", "04_fnFs.filtN.rds"))
+filtRs <- readRDS(file.path(LOCUS_DIR, "R_objects", "04_fnRs.filtN.rds"))
+out <- readRDS(file.path(LOCUS_DIR, "R_objects", "04_out.rds"))
+
+## check that the files in filtFs and filtRs lists exist - I.e. made it through filterAndTrim
+# (sometimes files can have no reads pass and it upsets the next stage)
+exists <- file.exists(filtFs)
+
+# run error rates but only on those files that exist
+
+## learn the error rates
+errF <- learnErrors(filtFs[exists], multithread = TRUE)
+errR <- learnErrors(filtRs[exists], multithread = TRUE)
+
+## write out error rates for use later
+saveRDS(errF, file = file.path(LOCUS_DIR, "R_objects", "05_errF.rds"))
+saveRDS(errR, file = file.path(LOCUS_DIR, "R_objects", "05_errR.rds"))
+
+## write plot to file for inspection
+pdf(file = file.path(LOCUS_DIR, 
+                             "plots", 
+                             paste0("05_", 
+                             marker, 
+                             "error_rate_plots.pdf")),  
+    width = 10, # The width of the plot in inches
+    height = 10)
+
+plotErrors(errF, nominalQ = TRUE)
+plotErrors(errR, nominalQ = TRUE)
+dev.off()
+```
+

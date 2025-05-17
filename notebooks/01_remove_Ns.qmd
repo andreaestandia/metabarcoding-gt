@@ -1,0 +1,133 @@
+---
+  title: "Step 1: Filter Ns and Quality Control"
+author: "Andrea Estandia"
+date: "`r Sys.Date()`"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+getwd()  # to confirm the working directory
+source(here::here("src", "metabarcoding-gt.R"))
+install_required_packages()
+```
+
+## Step 1: Filter Ns and Quality Control
+
+This step performs initial quality control by removing reads with Ns (ambiguous bases) and generates quality plots.
+
+### Set Parameters
+
+```{r parameters}
+# Set the locus name (16s, rbcl, or coi)
+LOCUS <- "16s"  # Change this as needed
+
+# Path to raw data
+RAW_DATA_DIR <- file.path(RAW_DIR, LOCUS, "Raw")
+
+# Create output directories
+LOCUS_DIR <- create_directories(LOCUS)
+
+# Save parameters to RDS for later steps
+saveRDS(LOCUS, file.path(LOCUS_DIR, "R_objects", "locus.rds"))
+```
+
+### Find Raw Sequence Files
+
+```{r find-raw-files}
+
+fnFs <- list.files(path = RAW_DATA_DIR,
+                       pattern = "_R1\\.fastq\\.gz$",
+                       recursive = TRUE,
+                       full.names = TRUE)
+
+fnRs <- list.files(path = RAW_DATA_DIR,
+                       pattern = "_R2\\.fastq\\.gz$",
+                       recursive = TRUE,
+                       full.names = TRUE)
+
+# Check that we have paired files
+if (length(fnFs) != length(fnRs)) {
+  stop("Number of forward and reverse files don't match!")
+}
+
+cat("Found", length(fnFs), "pairs of files\n")
+
+# Set up output file paths
+fnFs.filtN <- file.path(LOCUS_DIR, "filtered_N", basename(fnFs))
+fnRs.filtN <- file.path(LOCUS_DIR, "filtered_N", basename(fnRs))
+
+saveRDS(fnFs, file.path(LOCUS_DIR, "R_objects", "raw_fnFs.rds"))
+saveRDS(fnRs, file.path(LOCUS_DIR, "R_objects", "raw_fnRs.rds"))
+saveRDS(fnFs.filtN, file.path(LOCUS_DIR, "R_objects", "fnFs.filtN.rds"))
+saveRDS(fnRs.filtN, file.path(LOCUS_DIR, "R_objects", "fnRs.filtN.rds"))
+```
+
+### Filter Out Sequences with Ns
+
+```{r filter-Ns}
+# Filter sequences with Ns
+out <- filterAndTrim(fnFs, fnFs.filtN, fnRs, fnRs.filtN, 
+                     maxN = 0,            # Remove all sequences with Ns
+                     multithread = TRUE)  # Use multiple CPU cores
+
+# Save output for tracking
+saveRDS(out, file.path(LOCUS_DIR, "R_objects", "filterN_out.rds"))
+
+# Display the first few rows of output
+head(out)
+```
+
+### Generate Quality Control Plots
+
+```{r quality-plots}
+# Check if files exist (some samples may have been completely filtered out)
+fnFs.filtN.exists <- file.exists(fnFs.filtN)
+fnRs.filtN.exists <- file.exists(fnRs.filtN)
+
+# Plot quality profiles for the first few samples
+if (sum(fnFs.filtN.exists) > 0 && sum(fnRs.filtN.exists) > 0) {
+  # Determine how many samples to plot (up to 3, but not more than available)
+  n_to_plot <- min(3, sum(fnFs.filtN.exists))
+  
+  # Forward reads quality plot
+  fwd_plot <- plotQualityProfile(fnFs.filtN[fnFs.filtN.exists][1:n_to_plot])
+  save_quality_plot(fwd_plot, file.path(LOCUS_DIR, "plots", "forward_quality_plots.pdf"))
+  
+  # Reverse reads quality plot
+  rev_plot <- plotQualityProfile(fnRs.filtN[fnRs.filtN.exists][1:n_to_plot])
+  save_quality_plot(rev_plot, file.path(LOCUS_DIR, "plots", "reverse_quality_plots.pdf"))
+  
+  # Display plots in the report
+  fwd_plot
+  rev_plot
+} else {
+  cat("No samples passed the N-filtering step\n")
+}
+```
+
+### Summary
+
+```{r summary}
+# Summarize the filtering
+if (exists("out")) {
+  cat("Total reads before filtering:", sum(out[,1]), "\n")
+  cat("Total reads after filtering:", sum(out[,2]), "\n")
+  cat("Reads retained:", round(sum(out[,2])/sum(out[,1]) * 100, 2), "%\n")
+}
+
+# Save sample names for later steps
+if (sum(fnFs.filtN.exists) > 0) {
+  sample.names <- sapply(fnFs.filtN[fnFs.filtN.exists], get_sample_name)
+  saveRDS(sample.names, file.path(LOCUS_DIR, "R_objects", "sample_names.rds"))
+  cat("Sample names saved for", length(sample.names), "samples\n")
+}
+```
+
+## Next Steps
+
+Based on the quality plots, you can now decide on appropriate trimming parameters for the next step (primer removal and quality filtering).
+
+The forward and reverse read quality plots help determine where quality drops off, which will inform the truncation lengths for the next processing step.

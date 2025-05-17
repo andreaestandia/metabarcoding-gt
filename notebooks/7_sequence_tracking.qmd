@@ -1,0 +1,47 @@
+---
+  title: "Step 7: Sequence tracking"
+author: "Andrea Estandia"
+date: "`r Sys.Date()`"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+## read in the R objects
+out <- readRDS(file.path(LOCUS_DIR, 
+                            "R_objects", "04_out.rds"))
+dadaFs <- readRDS(file.path(LOCUS_DIR, 
+                            "R_objects","06_dadaFs.rds"))
+dadaRs <- readRDS(file.path(LOCUS_DIR, 
+                            "R_objects", "06_dadaRs.rds"))
+mergers	<- readRDS(file.path(LOCUS_DIR, 
+                            "R_objects", "06_mergers.rds"))
+seqtab.nochim <- readRDS(file.path(LOCUS_DIR, 
+                            "R_objects", "06_seqtab.nochim.rds"))
+filtFs <- readRDS(file.path(LOCUS_DIR, 
+                            "R_objects", "04_fnFs.filtN.rds"))
+
+track <- cbind(
+  out[,1],
+  out[,2],
+  sapply(dadaFs, getN),
+  sapply(dadaRs, getN),
+  sapply(mergers, getN),
+  rowSums(seqtab.nochim))
+colnames(track) <- c(
+  "input", 
+  "filtered",
+  "denoisedF",
+  "denoisedR",
+  "merged",
+  "nochim")
+
+# get sample names
+sample.names <- unname(sapply(filtFs, get.sample.name))
+rownames(track) <- sample.names
+
+write.table(track, file = file.path(LOCUS_DIR, 
+                            "outputs",
+                            paste0("07_", marker, "_track_reads_table.csv")))
+```
