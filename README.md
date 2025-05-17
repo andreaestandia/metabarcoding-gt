@@ -1,6 +1,6 @@
-# Metabarcoding of Chick Faecal Samples – Wytham Woods
+# Metabarcoding of great tit chick faecal Samples – Wytham Woods
 
-This repository contains the pipeline used for metabarcoding analyses of chick faecal samples collected in **Wytham Woods**. The goal is to characterise diet composition using high-throughput sequencing data and bioinformatic processing via the DADA2 workflow.
+This repository contains the pipeline used for metabarcoding analyses of great tit chick faecal samples collected in **Wytham Woods**. The goal is to characterise diet composition using high-throughput sequencing data and bioinformatic processing via the DADA2 workflow.
 
 ---
 
