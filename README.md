@@ -6,24 +6,24 @@ This repository contains the pipeline used for metabarcoding analyses of great t
 
 ## 🔬 Pipeline Overview
 
-The workflow is structured into **7 main steps**, implemented using a mix of `.R` and `.qmd` (Quarto) files:
+The workflow is structured into **7 main steps**, implemented using `.qmd` files:
 
 1. **01_remove_Ns.qmd**  
    Removes reads containing ambiguous bases (Ns) from the raw FASTQ files.
 
-2. **2_cutadapt.R / 2_cutadapt.qmd**  
+2. **2_cutadapt.qmd**  
    Trims primers and adapters from sequences using `cutadapt`.
 
 3. **3_raw_quality_plots.qmd**  
    Generates quality profiles of raw reads to assess sequencing quality.
 
-4. **4_trim_filter.R / 4_trim_filter.qmd**  
+4. **4_trim_filter.qmd**  
    Filters and trims reads based on quality thresholds to prepare for downstream processing.
 
-5. **5_generate_model_error.R / 5_generate_model_error.qmd**  
+5. **5_generate_model_error.qmd**  
    Learns and models sequencing error rates, a key step in the DADA2 pipeline.
 
-6. **6_derep_dada2_merge_remove_chimeras.R / .qmd**  
+6. **6_derep_dada2_merge_remove_chimeras.qmd**  
    Performs dereplication, sequence variant inference, merging of read pairs, and removal of chimeras.
 
 7. **7_sequence_tracking.qmd**  
@@ -33,7 +33,7 @@ The workflow is structured into **7 main steps**, implemented using a mix of `.R
    Assigns taxonomy to amplicon sequence variants (ASVs) using a reference database.
 
 9. **9_stats.qmd**  
-   Summarizes the dataset, e.g., number of ASVs per sample, taxonomic composition.
+   Summarises the dataset, e.g., number of ASVs per sample, taxonomic composition.
 
 ---
 
