@@ -18,13 +18,26 @@ install_required_packages()
 blast_dir <- file.path(LOCUS_DIR, "outputs", "blast")
 blast_files <- list.files(blast_dir, pattern = "blast_results_.*\\.tab$", full.names = TRUE)
 
+# --- Define geographic filter keywords ---
+exclude_keywords <- c(
+  "China", "Japan", "JPN", "Australia", "America", "Brazil", "Africa", 
+  "Asia", "tropical", "subtropical", "Indo-Pacific", "Caribbean",
+  "Madagascar", "New Zealand", "South America", "North America",
+  # Japanese regions
+  "Honshu", "Hokkaido", "Kyushu", "Shikoku", "Ryukyu",
+  # Chinese regions
+  "Sichuan", "Yunnan", "Guangdong", "Tibet",
+  # Other common non-European areas
+  "Pacific", "India", "Indonesia", "Philippines", "Malaysia"
+)
+
 # --- Function to extract genus and species from accession ---
 get_genus_species <- function(acc) {
   tryCatch({
     summary <- entrez_summary(db = "nuccore", id = acc)
     title <- summary$title
-    species <- str_extract(title, "^[A-Z][a-z]+\\s[a-z]+")
-    genus <- word(species, 1)
+    species <- stringr::str_extract(title, "^[A-Z][a-z]+\\s[a-z]+")
+    genus <- stringr::word(species, 1)
     return(c(species = species, genus = genus))
   }, error = function(e) {
     return(c(species = NA, genus = NA))
@@ -32,28 +45,54 @@ get_genus_species <- function(acc) {
 }
 
 # --- Process all files and combine into a single dataframe ---
-taxonomy_df <- map_dfr(blast_files, function(file) {
-  # Extract sample code from filename (e.g., A01 from "blast_results_A01_ASVs.tab")
-  code <- str_extract(basename(file), "(?<=blast_results_)[A-Za-z0-9]+")
+taxonomy_df <- purrr::map_dfr(blast_files, function(file) {
+  if (file.info(file)$size == 0) {
+    message("Skipping empty file: ", basename(file))
+    return(NULL)
+  }
   
-  # Read BLAST results
-  blast <- read.table(file, header = FALSE)
+  code <- stringr::str_extract(basename(file), "(?<=blast_results_).*?(?=_ASVs)")
+  
+  blast <- read.table(file, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
+  if (nrow(blast) == 0) {
+    message("No hits found in file: ", basename(file))
+    return(NULL)
+  }
+  
   blast <- blast %>%
-    mutate(accession = str_extract(V2, "(?<=\\|)[A-Z]{1,2}_?\\d+\\.\\d+"))
+    mutate(
+      asv = V1,
+      asv_number = str_extract(asv, "(?<=ASV)\\d+"),
+      code = paste0(code, "_P", asv_number),
+      accession = str_extract(V2, "(?<=\\|)[A-Z]{1,2}_?\\d+\\.\\d+")
+    )
   
-  # Get taxonomy info for each unique accession
-  unique_accessions <- unique(blast$accession)
+  if (all(is.na(blast$accession))) {
+    message("No valid accessions in file: ", basename(file))
+    return(NULL)
+  }
+  
+  unique_accessions <- unique(na.omit(blast$accession))
   tax_info <- t(sapply(unique_accessions, get_genus_species))
   tax_df <- data.frame(accession = unique_accessions, tax_info, row.names = NULL)
   
-  # Merge and return with sample code
   blast_tax <- left_join(blast, tax_df, by = "accession") %>%
     filter(!is.na(genus)) %>%
-    select(genus, species, accession) %>%
-    mutate(code = code)
+    mutate(
+      geographic_filter = if_else(
+        str_detect(species, str_c(exclude_keywords, collapse = "|")),
+        "unlikely",
+        "european"
+      )
+    ) %>%
+    select(code, asv, genus, species, accession, geographic_filter)
   
   return(blast_tax)
 })
+
+taxonomy_df
+
+
 ```
 
 ```{r}
@@ -70,13 +109,18 @@ final_file <-
   distinct(sample_name, species, .keep_all = TRUE)
 
 write.csv(final_file, 
-          file.path(LOCUS_DIR, "outputs", "COI_species.csv"), 
+          file.path(LOCUS_DIR, "outputs", "rbcl_species.csv"), 
           row.names = F)
 
 ```
 
 Retrieve nestbox info and date info
 ```{r}
+species <- read.csv(file.path(LOCUS_DIR, 
+                              "outputs", 
+                              "coi_species.csv"), 
+                    header = T)
+
 faecal_samples <- 
   read.csv(file.path(DATA_DIR, 
                      "faecal_samples.csv"),
@@ -94,8 +138,107 @@ nb <- read.csv(file.path(DATA_DIR, "nb_info.csv"), header=T) %>%
 
 
 ```{r}
+# Species abundance per sample
+species_abundance <- species %>%
+  group_by(sample_name) %>%
+  summarise(species_count = n(), .groups = "drop")
+
+# Genus abundance per sample (unique genera only)
+genus_abundance <- species %>%
+  distinct(sample_name, genus) %>%
+  group_by(sample_name) %>%
+  summarise(genus_count = n(), .groups = "drop")
+
+# Species abundance plot
+(ggplot(species_abundance, aes(x = species_count)) +
+  geom_histogram() +
+  custom_theme +
+  labs(
+    title = "Species abundance per sample",
+    y = "\nCount\n",
+    x = "\nSpecies count\n"
+  ) +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size=12),
+        axis.title.x = element_text(size=12))
+)+(
+# Genus abundance plot
+ggplot(genus_abundance, aes(x = genus_count)) +
+  geom_histogram() +
+  custom_theme +
+  labs(
+    title = "Genus abundance per sample",
+    y = "\nCount\n",
+    x = "\nGenus count\n"
+  ) +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size=12),
+        axis.title.x = element_text(size=12)))
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(showtext)
+library(sysfonts)
+
+# Add Roboto Condensed and enable showtext
+font_add_google("Roboto Condensed", "roboto_condensed")
+showtext_auto()
+
+custom_theme <- theme_minimal(base_family = "roboto_condensed") +
+  theme(
+    panel.grid = element_blank(),
+    axis.line = element_blank(),
+    axis.line.x.bottom = element_line(color = "black"),
+    axis.line.y.left = element_line(color = "black"),
+    axis.text = element_text(size = 12),
+    legend.position = "none"
+  )
+
+# Species abundance across all samples
+species_abundance <- species %>%
+  count(species, name = "abundance") %>%
+  arrange(desc(abundance))
+
+# Genus abundance across all samples
+genus_abundance <- species %>%
+  count(genus, name = "abundance") %>%
+  arrange(desc(abundance))
+
+# Plot species abundance (top 20 to avoid clutter)
+plot_species <- ggplot(species_abundance %>% slice_max(abundance, n = 20),
+       aes(x = reorder(species, abundance), y = abundance)) +
+  geom_col() +
+  coord_flip() +
+  custom_theme +
+  labs(
+    title = "Species abundance across all samples",
+    x = "\nSpecies\n",
+    y = "\nAbundance\n"
+  )
+
+# Plot genus abundance
+plot_genus <- ggplot(genus_abundance %>% slice_max(abundance, n = 20),
+       aes(x = reorder(genus, abundance), y = abundance)) +
+  geom_col() +
+  coord_flip() +
+  custom_theme +
+  labs(
+    title = "Genus abundance across all samples",
+    x = "\nGenus\n",
+    y = "\nAbundance\n"
+  )
+
+plot_species+plot_genus
+```
+
+
+```{r}
 richness <- 
-  final_file %>% 
+  species %>% 
   left_join(nb, by="nestbox") %>% 
   left_join(faecal_samples, by="sample_name") %>%
   group_by(date, sample_name, nestbox, day, x, y, edge_EDI, altitude_m, 
@@ -151,7 +294,8 @@ richness_filtered <- richness %>%
   filter(nestbox %in% complete_nestboxes)
 
 # Then plot as you did, but with filtered data:
-richness_filtered %>%
+plot_day<-
+  richness_filtered %>%
   ggplot(aes(x = as.factor(day), y = richness)) +
   geom_dots(
     side = "top",     # dots on top of axis
@@ -174,20 +318,77 @@ richness_filtered %>%
     width = 0.2,
     color = "black"
   ) +
-  theme_minimal(base_family = "roboto") +
+  theme_minimal(base_family = "roboto_condensed") +
   theme(
-    axis.text.x = element_text(size = 8),
-    axis.text.y = element_text(size = 8),
+    panel.grid = element_blank(),                 # remove all gridlines
+    axis.line = element_blank(),                  # remove default axis lines
+    axis.line.x.bottom = element_line(color = "black"),  # add bottom x axis
+    axis.line.y.left = element_line(color = "black"),    # add left y axis
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
     legend.position = "right"
   ) +
-  labs(x = "\nDay", y = "Richness\n")
+  labs(title="COI",
+       x = "\nDay", 
+       y = "Richness\n")
+
+# Convert collection_date to factor or Date if needed
+# richness_filtered$collection_date <- as.Date(richness_filtered$collection_date)
+
+library(ggplot2)
+library(ggbeeswarm)  # for better dot distribution
+library(dplyr)
+
+# Custom summary function that caps lower CI at 0
+mean_cl_no_neg <- function(x) {
+  m <- mean(x)
+  se <- sd(x) / sqrt(length(x))
+  data.frame(y = m, ymin = pmax(0, m - 1.96 * se), ymax = m + 1.96 * se)
+}
+
+plot_date <-
+  richness_filtered %>%
+  ggplot(aes(x = as.factor(date), y = richness, color = as.factor(day))) +
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 18,
+    size = 2.5,
+    color = "black",
+    aes(group = 1)
+  ) +
+  stat_summary(
+    fun.data = mean_cl_no_neg,
+    geom = "errorbar",
+    width = 0.2,
+    color = "black",
+    aes(group = 1)
+  ) +
+  theme_minimal(base_family = "roboto_condensed") +
+  theme(
+    panel.grid = element_blank(),                 # remove all gridlines
+    axis.line = element_blank(),                  # remove default axis lines
+    axis.line.x.bottom = element_line(color = "black"),  # add bottom x axis
+    axis.line.y.left = element_line(color = "black"),    # add left y axis
+    axis.text.x = element_text(size = 12,angle=45, hjust=1),
+    axis.text.y = element_text(size = 12),
+    legend.position = "right"
+  ) +
+  labs(
+    title = "COI",
+    x = "\n",
+    y = "Richness\n",
+    color = "Day"
+  )
+
+plot_day/plot_date
 
 # Filter data for complete nestboxes
 richness_filtered <- richness %>%
   filter(nestbox %in% complete_nestboxes)
 
 # Fit linear mixed model
-model <- lmer(richness ~ factor(day) + (1 | nestbox/sample_name), data = richness_filtered)
+model <- lme4::lmer(richness ~ factor(day) + (1 | nestbox/sample_name), data = richness_filtered)
 
 # Summary with p-values
 summary(model)
@@ -200,13 +401,13 @@ richness %>%
   ggplot(aes(x = x, y = y, color = richness)) +
   geom_point(size = 3) +
   scale_color_viridis(option = "magma") +
-  theme_minimal(base_family = "roboto") +
+  theme_minimal(base_family = "roboto_condensed") +
   theme(
     panel.background = element_rect(fill = "gray30", color = NA),
     plot.background = element_rect(fill = "gray30", color = NA),
     panel.grid = element_blank(),
-    axis.text.x = element_text(size = 8, color = "white"),
-    axis.text.y = element_text(size = 8, color = "white"),
+    axis.text.x = element_text(size = 12, color = "white"),
+    axis.text.y = element_text(size = 12, color = "white"),
     axis.title = element_text(color = "white"),
     legend.position = "right",
     legend.text = element_text(color = "white"),

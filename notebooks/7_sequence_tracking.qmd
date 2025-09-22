@@ -11,6 +11,16 @@ editor_options:
 ## read in the R objects
 out <- readRDS(file.path(LOCUS_DIR, 
                             "R_objects", "04_out.rds"))
+
+out <- as.data.frame(out)
+
+# Add the new column safely
+if (LOCUS == 16) {
+  out$sample_name <- sapply(rownames(out), get.sample.name.16s)
+} else {
+  out$sample_name <- sapply(rownames(out), get.sample.name)
+}
+
 dadaFs <- readRDS(file.path(LOCUS_DIR, 
                             "R_objects","06_dadaFs.rds"))
 dadaRs <- readRDS(file.path(LOCUS_DIR, 
@@ -22,27 +32,22 @@ seqtab.nochim <- readRDS(file.path(LOCUS_DIR,
 filtFs <- readRDS(file.path(LOCUS_DIR, 
                             "R_objects", "04_fnFs.filtN.rds"))
 
-track <- cbind(
-  out[,1],
-  out[,2],
-  sapply(dadaFs, getN),
-  sapply(dadaRs, getN),
-  sapply(mergers, getN),
-  rowSums(seqtab.nochim))
-colnames(track) <- c(
-  "input", 
-  "filtered",
-  "denoisedF",
-  "denoisedR",
-  "merged",
-  "nochim")
+fnFs.cut <- readRDS(file.path(LOCUS_DIR, "R_objects", "02_fnFs.cut.rds"))
+fnRs.cut <- readRDS(file.path(LOCUS_DIR, "R_objects", "02_fnRs.cut.rds"))
 
-# extract sample names 
-sample.names <- unname(sapply(
-  fnFs.cut,
-  if (LOCUS == "16s") get.sample.name.16s else get.sample.name
-))
-rownames(track) <- sample.names
+track <- data.frame(
+  sample = out$sample_name, 
+  input = out[,1],
+  filtered = out[,2],
+  denoisedF = sapply(dadaFs, getN)[out$sample_name],
+  denoisedR = sapply(dadaRs, getN)[out$sample_name],
+  merged = sapply(mergers, getN)[out$sample_name],
+  nonchim = rowSums(seqtab.nochim)[out$sample_name]
+)
+
+colnames(track) <- c("sample", "input", "filtered", 
+                     "denoisedF", "denoisedR", "merged", "nochim")
+
 
 write.table(track, file = file.path(LOCUS_DIR, 
                             "outputs",

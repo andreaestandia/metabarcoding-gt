@@ -17,7 +17,7 @@ install_required_packages <- function() {
   
   required_packages <- c(
     # Core packages
-    "dada2", "ShortRead", "Biostrings", "ggplot2", "optparse", 
+    "here", "dada2", "ShortRead", "Biostrings", "ggplot2", "optparse", 
     "gridExtra", "reshape2", "knitr", "rmarkdown", "dplyr",
     # Additional useful packages
     "vegan", "readr", "tidyr", "stringr", "rentrez", "treemapify",
@@ -133,17 +133,75 @@ save_quality_plot <- function(plot_data, file_path, width=10, height=8) {
   dev.off()
 }
 
-# Extract sample names
-get.sample.name <- function(fname) strsplit(basename(fname), "_")[[1]][4]
+get.sample.name <- function(fname) {
+  # Get parts
+  parts <- strsplit(basename(fname), "_")[[1]]
+  
+  # parts look like:
+  # [1] "IDT10"       "UDI"     "Adapter3553-Irene" "A1" "COI" "CGAGAAGATA-CGTCGCCTAT" "L001" "R1.fastq.gz"
+  
+  adapter_part <- parts[3] # e.g. "Adapter3553-Irene"
+  well         <- parts[4] # e.g. "A1"
+  locus        <- parts[5] # e.g. "COI"
+  
+  # Extract adapter number
+  adapter_num <- as.numeric(gsub("Adapter", "", strsplit(adapter_part, "-")[[1]][1]))
+  
+  # Determine plate
+  plate <- if (!is.na(adapter_num)) {
+    if (adapter_num >= 577 & adapter_num <= 671) {
+      "P4"
+    } else if (adapter_num >= 3553 & adapter_num <= 3648) {
+      "P1"
+    } else if (adapter_num >= 3649 & adapter_num <= 3744) {
+      "P2"
+    } else if (adapter_num >= 3745 & adapter_num <= 3839) {
+      "P3"
+    } else {
+      paste0("Adapter", adapter_num)
+    }
+  } else {
+    "UnknownPlate"
+  }
+  
+  paste(well, plate, locus, sep = "_")
+}
 
 get.sample.name.16s <- function(fname) {
-  # Extract the base filename
-  base <- basename(fname)
-  # Extract the part that looks like "Adapter3820-I4"
-  adapter_part <- strsplit(base, "_")[[1]][3]
-  # Extract "I4" from "Adapter3820-I4"
-  strsplit(adapter_part, "-")[[1]][2]
+  parts <- strsplit(basename(fname), "_")[[1]]
+  
+  # parts:
+  # [1] "IDT10" "UDI" "Adapter668-F19" "AAGTTAGGAC-TCACAGCTGC" "L001" "R1.fastq.gz"
+  
+  adapter_part <- parts[3]
+  adapter_split <- strsplit(adapter_part, "-")[[1]]
+  
+  adapter <- adapter_split[1]
+  well    <- adapter_split[2]
+  
+  adapter_num <- as.numeric(gsub("Adapter", "", adapter))
+  
+  plate <- if (!is.na(adapter_num)) {
+    if (adapter_num >= 579 & adapter_num <= 671) {
+      "P4"
+    } else if (adapter_num >= 3553 & adapter_num <= 3648) {
+      "P1"
+    } else if (adapter_num >= 3649 & adapter_num <= 3744) {
+      "P2"
+    } else if (adapter_num >= 3745 & adapter_num <= 3839) {
+      "P3"
+    } else {
+      paste0("Adapter", adapter_num)
+    }
+  } else {
+    "UnknownPlate"
+  }
+  
+  # Add "_16s" at the end
+  paste(well, plate, "16s", sep = "_")
 }
+
+
 
 
 # Function to get the number of reads at each step
@@ -165,3 +223,13 @@ primerHits <- function(primer, fn) {
   nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
   return(sum(nhits > 0))
 }
+
+library(showtext)
+library(sysfonts)
+library(ggplot2)
+
+# Add Roboto Condensed from Google Fonts
+font_add_google("Roboto Condensed", "roboto_condensed")
+
+# Automatically use showtext for new plots
+showtext_auto()

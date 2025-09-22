@@ -9,9 +9,7 @@ editor_options:
   
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-getwd()  # to confirm the working directory
-source(here::here("src", "metabarcoding-gt.R"))
-install_required_packages()
+source("./src/metabarcoding-gt.R")
 ```
 
 ## Step 1: Filter Ns and Quality Control
@@ -120,7 +118,12 @@ if (exists("out")) {
 
 # Save sample names for later steps
 if (sum(fnFs.filtN.exists) > 0) {
-  sample.names <- sapply(fnFs.filtN[fnFs.filtN.exists], get_sample_name)
+  sample.names <- if (LOCUS == "16s") {
+    sapply(fnFs.filtN[fnFs.filtN.exists], get.sample.name.16s)
+  } else {
+    sapply(fnFs.filtN[fnFs.filtN.exists], get.sample.name)
+  }
+  
   saveRDS(sample.names, file.path(LOCUS_DIR, "R_objects", "sample_names.rds"))
   cat("Sample names saved for", length(sample.names), "samples\n")
 }

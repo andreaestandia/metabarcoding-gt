@@ -17,7 +17,7 @@ install_required_packages()
 # Read BLAST output
 blast <- read.table(file.path(LOCUS_DIR, "outputs",
                               "blast",
-                              "blast_results_A10_ASVs.tab"), header = FALSE)
+                              "blast_results_A11_ASVs.tab"), header = FALSE)
 # Define input and output directories
 blast_dir <- file.path(LOCUS_DIR, "outputs",
                               "blast")
@@ -46,6 +46,42 @@ get_genus_species <- function(acc) {
   })
 }
 
+get_genus_species_filtered <- function(acc, target_region = "europe") {
+  tryCatch({
+    summary <- entrez_summary(db = "nuccore", id = acc)
+    title <- summary$title
+    
+    # Extract genus/species
+    species <- str_extract(title, "^[A-Z][a-z]+\\s[a-z]+")
+    genus <- word(species, 1)
+    
+    # Keywords and common non-European regions/countries
+    exclude_keywords <- c(
+      "China", "Japan", "JPN", "Australia", "America", "Brazil", "Africa", 
+      "Asia", "tropical", "subtropical", "Indo-Pacific", "Caribbean",
+      "Madagascar", "New Zealand", "South America", "North America",
+      # Japanese regions
+      "Honshu", "Hokkaido", "Kyushu", "Shikoku", "Ryukyu",
+      # Chinese regions
+      "Sichuan", "Yunnan", "Guangdong", "Tibet",
+      # Other common non-European areas
+      "Pacific", "India", "Indonesia", "Philippines", "Malaysia"
+    )
+    
+    # Check if any excluded keyword appears in the title
+    geographic_filter <- !any(str_detect(title, regex(paste(exclude_keywords, collapse = "|"), ignore_case = TRUE)))
+    
+    if (!geographic_filter) {
+      return(c(species = NA, genus = NA, filter_reason = "geographic"))
+    }
+    
+    return(c(species = species, genus = genus, filter_reason = "passed"))
+    
+  }, error = function(e) {
+    return(c(species = NA, genus = NA, filter_reason = "error"))
+  })
+}
+
 # List all .tab files with full path
 tab_files <- list.files(blast_dir, pattern = "blast_results_.*\\.tab$", full.names = TRUE)
 
@@ -58,7 +94,7 @@ for (file in tab_files) {
     mutate(accession = str_extract(V2, "(?<=\\|)[A-Z]{1,2}_?\\d+\\.\\d+"))
   
   unique_accessions <- unique(blast$accession)
-  tax_info <- t(sapply(unique_accessions, get_genus_species))
+  tax_info <- t(sapply(unique_accessions, get_genus_species_filtered))
   tax_df <- data.frame(accession = unique_accessions, tax_info, row.names = NULL)
   
   blast_tax <- left_join(blast, tax_df, by = "accession") %>% as.data.frame()
@@ -97,6 +133,26 @@ for (file in tab_files) {
   final_plot <- genus_plot / species_plot
   out_file <- file.path(output_dir, paste0("plot_", tools::file_path_sans_ext(basename(file)), ".pdf"))
   ggsave(out_file, plot = final_plot, width = 12, height = 10)
+}
+
+for (file in tab_files) {
+  cat("Processing", file, "...\n")
+  
+  blast <- read.table(file, header = FALSE, stringsAsFactors = FALSE) %>%
+    mutate(accession = str_extract(V2, "(?<=\\|)[A-Z]{1,2}_?\\d+\\.\\d+"))
+  
+  unique_accessions <- unique(blast$accession)
+  tax_info <- t(sapply(unique_accessions, get_genus_species_filtered))
+  tax_df <- data.frame(accession = unique_accessions, tax_info, row.names = NULL)
+  
+  # Merge tax info with original BLAST matches
+  blast_matches <- left_join(blast, tax_df, by = "accession") %>%
+    select(query = V1, accession, genus, species, filter_reason)
+  
+  # Save as CSV per file
+  out_file <- file.path(output_dir,
+                        paste0(tools::file_path_sans_ext(basename(file)), "_matches.csv"))
+  write_csv(blast_matches, out_file)
 }
 
 ############
